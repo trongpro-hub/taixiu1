@@ -1,98 +1,40 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(path.join(__dirname)));
+let timeLeft = 60; // Thời gian đếm ngược
+let currentSession = 1001; // Mã phiên hiện tại
 
-const TICK_MS = 1000;
-const BETTING_SECONDS = 60;
-const SHAKING_SECONDS = 2;
-const OPEN_SECONDS = 12;
-const RESULT_SECONDS = 3;
-
-const state = {
-  phase: 'BETTING',          // BETTING | SHAKING | WAIT_OPEN | RESULT
-  timeLeft: BETTING_SECONDS,
-  shakeLeft: 0,
-  openLeft: OPEN_SECONDS,
-  resultLeft: 0,
-  currentSessionId: 5409491,
-  currentResult: { id: 5409491, total: 0, side: '', dices: [1, 1, 1] },
-  historyData: []
-};
-
-function newRoundResult() {
-  const d = [
-    Math.floor(Math.random() * 6) + 1,
-    Math.floor(Math.random() * 6) + 1,
-    Math.floor(Math.random() * 6) + 1
-  ];
-  const total = d[0] + d[1] + d[2];
-  state.currentSessionId += 1;
-  state.currentResult = {
-    id: state.currentSessionId,
-    total,
-    side: total >= 11 ? 'tai' : 'xiu',
-    dices: d
-  };
-}
-
-function pushHistory() {
-  state.historyData.push(state.currentResult);
-  if (state.historyData.length > 20) state.historyData.shift();
-}
-
-function advanceState() {
-  if (state.phase === 'BETTING') {
-    state.timeLeft -= 1;
-    if (state.timeLeft <= 0) {
-      state.phase = 'SHAKING';
-      state.shakeLeft = SHAKING_SECONDS;
-    }
-  } else if (state.phase === 'SHAKING') {
-    state.shakeLeft -= 1;
-    if (state.shakeLeft <= 0) {
-      state.phase = 'WAIT_OPEN';
-      state.openLeft = OPEN_SECONDS;
-      newRoundResult();
-    }
-  } else if (state.phase === 'WAIT_OPEN') {
-    state.openLeft -= 1;
-    if (state.openLeft <= 0) {
-      state.phase = 'RESULT';
-      state.resultLeft = RESULT_SECONDS;
-      pushHistory();
-    }
-  } else if (state.phase === 'RESULT') {
-    state.resultLeft -= 1;
-    if (state.resultLeft <= 0) {
-      state.phase = 'BETTING';
-      state.timeLeft = BETTING_SECONDS;
-      state.shakeLeft = 0;
-      state.openLeft = OPEN_SECONDS;
-      state.resultLeft = 0;
-    }
-  }
-}
-
+// Hàm chạy ngầm để quản lý phiên
 setInterval(() => {
-  advanceState();
-  io.emit('sync-state', state);
-}, TICK_MS);
+    timeLeft--;
 
-io.on('connection', (socket) => {
-  socket.emit('sync-state', state);
+    if (timeLeft < 0) {
+        // Xử lý khi hết thời gian: Random xí ngầu và sang phiên mới
+        const dice1 = Math.floor(Math.random() * 6) + 1;
+        const dice2 = Math.floor(Math.random() * 6) + 1;const dice3 = Math.floor(Math.random() * 6) + 1;
+        
+        io.emit('session-result', {
+            session: currentSession,
+            dices: [dice1, dice2, dice3],
+            total: dice1 + dice2 + dice3
+        });
 
-  socket.on('request-state', () => {
-    socket.emit('sync-state', state);
-  });
-});
+        currentSession++;
+        timeLeft = 60; // Reset thời gian
+    }
+
+    // Gửi thời gian thực cho tất cả người chơi
+    io.emit('timer-update', {
+        timeLeft: timeLeft,
+        session: currentSession
+    });
+}, 1000);
 
 server.listen(3000, () => {
-  console.log('Server running at http://localhost:3000');
+    console.log('Server Tài Xỉu đang chạy tại port 3000');
 });
